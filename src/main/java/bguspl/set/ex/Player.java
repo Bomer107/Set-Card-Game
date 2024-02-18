@@ -50,6 +50,14 @@ public class Player implements Runnable {
      */
     private int score;
 
+    private int[] cards = new int[3];
+    private int cardsSize = 0;
+
+    /**
+     * The dealer of the game.
+     */
+    Dealer dealer;
+
     /**
      * The class constructor.
      *
@@ -61,6 +69,7 @@ public class Player implements Runnable {
      */
     public Player(Env env, Dealer dealer, Table table, int id, boolean human) {
         this.env = env;
+        this.dealer = dealer;
         this.table = table;
         this.id = id;
         this.human = human;
@@ -76,6 +85,12 @@ public class Player implements Runnable {
         if (!human) createArtificialIntelligence();
 
         while (!terminate) {
+            if(cardsSize==3){
+                synchronized(table){
+                    //checks if cards exist
+                    //notify dealer
+                }
+            }
             // TODO implement main player loop
         }
         if (!human) try { aiThread.join(); } catch (InterruptedException ignored) {}
@@ -114,7 +129,9 @@ public class Player implements Runnable {
      * @param slot - the slot corresponding to the key pressed.
      */
     public void keyPressed(int slot) {
-        // TODO implement
+        
+
+
     }
 
     /**

@@ -21,6 +21,7 @@ public class Dealer implements Runnable {
      */
     private final Table table;
     private final Player[] players;
+    Object lock;
 
     /**
      * The list of card ids that are left in the dealer's deck.
@@ -106,14 +107,19 @@ public class Dealer implements Runnable {
      * Sleep for a fixed amount of time or until the thread is awakened for some purpose.
      */
     private void sleepUntilWokenOrTimeout() {
-        // TODO implement
+        try {
+            this.wait(env.config.turnTimeoutMillis);
+        } catch (InterruptedException e) {}
     }
-
+    
     /**
      * Reset and/or update the countdown and the countdown display.
      */
     private void updateTimerDisplay(boolean reset) {
-        // TODO implement
+        if(reset)
+            env.ui.setCountdown(env.config.turnTimeoutMillis, false);
+        else()
+
     }
 
     /**
