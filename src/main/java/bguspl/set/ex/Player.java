@@ -54,7 +54,7 @@ public class Player implements Runnable {
     private int[][] tokens = new int[3][2];
     private int tokenSize = 0;
     private  Queue<int[]> queue = new LinkedList<int[]>();
-    
+    private boolean finish;
     /**
      * The dealer of the game.
      */
@@ -87,15 +87,12 @@ public class Player implements Runnable {
         if (!human) createArtificialIntelligence();
 
         while (!terminate) {
-            if(!queue.isEmpty()){
-
-           
-                    //checks if cards exist
-                    //notify dealer
-                   
-                }
+            if(!queue.isEmpty())
+                checkToken();  
+            if(tokenSize==3)
+                wakeDealer();
             }
-            // TODO implement main player loop
+            
         
         if (!human) try { aiThread.join(); } catch (InterruptedException ignored) {}
         env.logger.info("thread " + Thread.currentThread().getName() + " terminated.");
@@ -147,6 +144,7 @@ public class Player implements Runnable {
      * @post - the player's score is updated in the ui.
      */
     public void point() {
+        
         // TODO implement
 
         int ignored = table.countCards(); // this part is just for demonstration in the unit tests
@@ -163,12 +161,12 @@ public class Player implements Runnable {
     public int score() {
         return score;
     }
-    private void placeToken(){
+    private void checkToken(){
         while(!queue.isEmpty()){
             int []action=queue.poll();
             boolean isfind =false;
             for(int i=0;i<2&isfind;i++){
-                if(action[1]==tokens[1][i])
+                if(action[1]==tokens[i][1])
                     isfind=true;
                     removeToken(action[1],i);
             }
@@ -191,5 +189,26 @@ public class Player implements Runnable {
         tokenSize++;
         table.placeToken(id,token[0]);
 
+    }
+    private void wakeDealer()  throws Exception{
+        table.sem.acquire();
+        boolean isfind=true;
+        for(int i=0;i<env.config.featureSize&isfind;i++){
+            if(tokens[i][1]!=table.slotToCard(tokens[i][0])){
+                isfind=false;
+                table.sem.release();
+                removeToken(tokens[i][0], i);
+            }
+        }
+        if(isfind){
+            table.setCardToCheack(tokens, id);
+            dealer.notify();
+            synchronized(dealer.wait){
+            while (!finish) {
+                wait();   
+            }
+            table.sem.release();
+        }
+        }
     }
 }

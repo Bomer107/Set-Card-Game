@@ -5,6 +5,7 @@ import bguspl.set.Env;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
 /**
@@ -28,7 +29,9 @@ public class Table {
      * Mapping between a card and the slot it is in (null if none).
      */
     protected final Integer[] cardToSlot; // slot per card (if any)
-
+    public Semaphore sem;
+    private int[][] cardToCheck=new int[3][2];
+    private int player;
     /**
      * Constructor for testing.
      *
@@ -41,6 +44,7 @@ public class Table {
         this.env = env;
         this.slotToCard = slotToCard;
         this.cardToSlot = cardToSlot;
+        this.sem=new Semaphore(1);
     }
 
     /**
@@ -144,5 +148,10 @@ public class Table {
 
     public Integer slotToCard(Integer slot){
         return slotToCard[slot];
+    }
+    public void setCardToCheack(int[][] cardToCheack,int id){
+        this.cardToCheck=cardToCheack;
+        player=id;
+    
     }
 }
