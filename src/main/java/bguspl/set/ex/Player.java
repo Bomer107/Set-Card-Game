@@ -50,7 +50,7 @@ public class Player implements Runnable {
      */
     private int score;
 
-    private int[] cards = new int[3];
+    private int[][] cardsAndSlots = new int[3][2];
     private int cardsSize = 0;
 
     /**

@@ -21,7 +21,7 @@ public class Dealer implements Runnable {
      */
     private final Table table;
     private final Player[] players;
-    Object lock;
+    private final Thread[] playersThreads;
 
     /**
      * The list of card ids that are left in the dealer's deck.
@@ -42,6 +42,7 @@ public class Dealer implements Runnable {
         this.env = env;
         this.table = table;
         this.players = players;
+        playersThreads = new Thread[players.length];
         deck = IntStream.range(0, env.config.deckSize).boxed().collect(Collectors.toList());
     }
 
@@ -51,6 +52,11 @@ public class Dealer implements Runnable {
     @Override
     public void run() {
         env.logger.info("thread " + Thread.currentThread().getName() + " starting.");
+        for (int i = 0; i < players.length; ++i){
+            playersThreads[i] = new Thread(players[i]);
+            playersThreads[i].start();
+        }
+
         while (!shouldFinish()) {
             placeCardsOnTable();
             timerLoop();
@@ -100,7 +106,11 @@ public class Dealer implements Runnable {
      * Check if any cards can be removed from the deck and placed on the table.
      */
     private void placeCardsOnTable() {
-        // TODO implement
+        Integer card = deck.remove(deck.size());
+        int minNumSlots = 0;
+        for (int slot = minNumSlots; slot < env.config.tableSize; ++slot)
+            if(table.slotToCard(slot) != null)
+                table.placeCard(card, slot); 
     }
 
     /**

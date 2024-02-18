@@ -137,4 +137,12 @@ public class Table {
         }
         return false;
     }
+
+    public Integer cardToSlot(Integer card){
+        return cardToSlot[card];
+    }
+
+    public Integer slotToCard(Integer slot){
+        return slotToCard[slot];
+    }
 }
