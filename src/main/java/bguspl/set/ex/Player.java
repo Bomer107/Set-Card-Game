@@ -1,7 +1,8 @@
 package bguspl.set.ex;
 
 import bguspl.set.Env;
-
+import java.util.LinkedList;
+import java.util.Queue;
 /**
  * This class manages the players' threads and data
  *
@@ -50,9 +51,10 @@ public class Player implements Runnable {
      */
     private int score;
 
-    private int[][] cardsAndSlots = new int[3][2];
-    private int cardsSize = 0;
-
+    private int[][] tokens = new int[3][2];
+    private int tokenSize = 0;
+    private  Queue<int[]> queue = new LinkedList<int[]>();
+    
     /**
      * The dealer of the game.
      */
@@ -85,14 +87,16 @@ public class Player implements Runnable {
         if (!human) createArtificialIntelligence();
 
         while (!terminate) {
-            if(cardsSize==3){
-                synchronized(table){
+            if(!queue.isEmpty()){
+
+           
                     //checks if cards exist
                     //notify dealer
+                   
                 }
             }
             // TODO implement main player loop
-        }
+        
         if (!human) try { aiThread.join(); } catch (InterruptedException ignored) {}
         env.logger.info("thread " + Thread.currentThread().getName() + " terminated.");
     }
@@ -129,7 +133,9 @@ public class Player implements Runnable {
      * @param slot - the slot corresponding to the key pressed.
      */
     public void keyPressed(int slot) {
-        
+        Integer card=table.slotToCard(slot);
+        int []action={slot,card};
+        queue.add(action);
 
 
     }
@@ -156,5 +162,34 @@ public class Player implements Runnable {
 
     public int score() {
         return score;
+    }
+    private void placeToken(){
+        while(!queue.isEmpty()){
+            int []action=queue.poll();
+            boolean isfind =false;
+            for(int i=0;i<2&isfind;i++){
+                if(action[1]==tokens[1][i])
+                    isfind=true;
+                    removeToken(action[1],i);
+            }
+            if(!isfind&tokenSize<env.config.featureSize)
+                addToken(action);
+        }
+    }
+    public void removeToken(int slot,int rowToDelete){
+        for (int i = rowToDelete; i < tokens.length - 1; i++) {
+            tokens[i] = tokens[i + 1];
+        }
+        tokens[tokens.length - 1] = new int[tokens[0].length];
+        tokenSize--;
+        boolean isremove= table.removeToken(slot,id);
+    }   
+
+    
+    public void addToken(int[]token){
+        tokens[tokenSize]=token;
+        tokenSize++;
+        table.placeToken(id,token[0]);
+
     }
 }
