@@ -55,6 +55,7 @@ public class Player implements Runnable {
     private int tokenSize = 0;
     private  Queue<int[]> queue = new LinkedList<int[]>();
     private boolean finish;
+    private long timeToSleep;
     /**
      * The dealer of the game.
      */
@@ -189,6 +190,16 @@ public class Player implements Runnable {
         tokens[tokenSize]=token;
         tokenSize++;
         table.placeToken(id,token[0]);
-
+        if(tokenSize==3){
+            table.setCardToCheack(tokens, id);
+            dealer.notify();
+            synchronized(this){
+                try{
+                     wait();
+                 }catch(InterruptedException e){}
+            }
+            
+        }
+        table.sem.release();
     }
 }

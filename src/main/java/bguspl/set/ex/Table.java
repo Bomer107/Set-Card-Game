@@ -124,6 +124,9 @@ public class Table {
      * @param slot   - the slot on which to place the token.
      */
     public void placeToken(int player, int slot) {
+        try{
+            sem.acquire();
+        } catch(InterruptedException e){}
         if(slotToCard[slot] != null)
             env.ui.placeToken(player, slot);
     }
@@ -135,11 +138,17 @@ public class Table {
      * @return       - true iff a token was successfully removed.
      */
     public boolean removeToken(int player, int slot) {
+        try{
+            sem.acquire();
+        } catch(InterruptedException e){}
         if(slotToCard[slot] != null){
             env.ui.removeToken(player, slot);
+            sem.release();
             return true;
         }
+        sem.release();
         return false;
+        
     }
 
     public Integer cardToSlot(Integer card){
@@ -150,8 +159,11 @@ public class Table {
         return slotToCard[slot];
     }
     public void setCardToCheack(int[][] cardToCheack,int id){
+        
+        sem.release();
         this.cardToCheck=cardToCheack;
         player=id;
+        
         
     }
 }
