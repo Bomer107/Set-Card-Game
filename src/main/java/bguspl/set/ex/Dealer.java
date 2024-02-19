@@ -2,7 +2,6 @@ package bguspl.set.ex;
 
 import bguspl.set.Env;
 import bguspl.set.ThreadLogger;
-import bguspl.set.ThreadLogger;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -68,11 +67,6 @@ public class Dealer implements Runnable {
         //strating the game
         while (!shouldFinish()) {     
             placeCardsOnTable();
-            try {
-                // shutdown stuff
-            
-            playersThreads[0].joinWithLog();
-        } catch (InterruptedException ignored) {}
             timerLoop();
             updateTimerDisplay(false);
             removeAllCardsFromTable();

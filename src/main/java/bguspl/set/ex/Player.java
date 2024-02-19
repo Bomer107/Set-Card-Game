@@ -181,7 +181,7 @@ public class Player implements Runnable {
         }
        
         tokenSize--;
-        boolean isremove= table.removeToken(id,slot);
+        boolean isremove = table.removeToken(id,slot);
     }   
 
     
@@ -190,26 +190,5 @@ public class Player implements Runnable {
         tokenSize++;
         table.placeToken(id,token[0]);
 
-    }
-    private void wakeDealer()  throws Exception{
-        table.sem.acquire();
-        boolean isfind=true;
-        for(int i=0;i<env.config.featureSize&isfind;i++){
-            if(tokens[i][1]!=table.slotToCard(tokens[i][0])){
-                isfind=false;
-                table.sem.release();
-                removeToken(tokens[i][0], i);
-            }
-        }
-        if(isfind){
-            table.setCardToCheack(tokens, id);
-            dealer.notify();
-            synchronized(dealer.wait){
-            while (!finish) {
-                wait();   
-            }
-            table.sem.release();
-        }
-        }
     }
 }
