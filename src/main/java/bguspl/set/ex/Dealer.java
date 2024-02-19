@@ -24,6 +24,7 @@ public class Dealer implements Runnable {
     private final Table table;
     private final Player[] players;
     private final ThreadLogger[] playersThreads;
+    private static final long wakeUp = 10;
 
     /**
      * The list of card ids that are left in the dealer's deck.
@@ -79,7 +80,8 @@ public class Dealer implements Runnable {
      * The inner loop of the dealer thread that runs as long as the countdown did not time out.
      */
     private void timerLoop() {
-        reshuffleTime=System.currentTimeMillis()+reshuffleTime;
+        reshuffleTime = System.currentTimeMillis() + env.config.turnTimeoutMillis - 1;
+        env.ui.setCountdown(reshuffleTime - System.currentTimeMillis(), false);
         while (!terminate && System.currentTimeMillis() < reshuffleTime) {
             sleepUntilWokenOrTimeout();
             updateTimerDisplay(false);
@@ -129,9 +131,11 @@ public class Dealer implements Runnable {
     private void sleepUntilWokenOrTimeout() {
         try {
             synchronized(this){
-                this.wait(env.config.turnTimeoutMillis);
+                this.wait(wakeUp);
             }
-        } catch (InterruptedException e) {}
+        } catch (InterruptedException e) {
+            table.checkSet();
+        }
     }
     
     /**
@@ -142,9 +146,9 @@ public class Dealer implements Runnable {
             env.ui.setCountdown(env.config.turnTimeoutMillis, false);
         else{
             boolean warn = false;
-            if(true)
+            if(reshuffleTime - System.currentTimeMillis() <= env.config.turnTimeoutWarningMillis)
                 warn = true;
-            env.ui.setCountdown(env.config.turnTimeoutMillis - System.currentTimeMillis(), warn);
+            env.ui.setCountdown(reshuffleTime - System.currentTimeMillis(), warn);
         }
     }
 
