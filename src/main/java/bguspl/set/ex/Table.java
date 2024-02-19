@@ -152,6 +152,6 @@ public class Table {
     public void setCardToCheack(int[][] cardToCheack,int id){
         this.cardToCheck=cardToCheack;
         player=id;
-    
+        
     }
 }

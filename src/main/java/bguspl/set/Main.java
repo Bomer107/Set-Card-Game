@@ -68,6 +68,7 @@ public class Main {
         // start the dealer thread
         ThreadLogger dealerThread = new ThreadLogger(dealer, "dealer", logger);
         dealerThread.startWithLog();
+        
 
         try {
             // shutdown stuff

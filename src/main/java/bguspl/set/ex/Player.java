@@ -89,8 +89,7 @@ public class Player implements Runnable {
         while (!terminate) {
             if(!queue.isEmpty())
                 checkToken();  
-            if(tokenSize==3)
-                wakeDealer();
+            
             }
             
         
@@ -165,7 +164,7 @@ public class Player implements Runnable {
         while(!queue.isEmpty()){
             int []action=queue.poll();
             boolean isfind =false;
-            for(int i=0;i<2&isfind;i++){
+            for(int i=0;i<2&!isfind;i++){
                 if(action[1]==tokens[i][1])
                     isfind=true;
                     removeToken(action[1],i);

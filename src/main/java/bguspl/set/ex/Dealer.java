@@ -1,6 +1,7 @@
 package bguspl.set.ex;
 
 import bguspl.set.Env;
+import bguspl.set.ThreadLogger;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -21,7 +22,7 @@ public class Dealer implements Runnable {
      */
     private final Table table;
     private final Player[] players;
-    private final Thread[] playersThreads;
+    private final ThreadLogger[] playersThreads;
     public Object wait;
     /**
      * The list of card ids that are left in the dealer's deck.
@@ -43,7 +44,7 @@ public class Dealer implements Runnable {
         this.table = table;
         this.players = players;
         terminate=false;
-        playersThreads = new Thread[players.length];
+        playersThreads = new ThreadLogger[players.length];
         deck = IntStream.range(0, env.config.deckSize).boxed().collect(Collectors.toList());
     }
 
@@ -53,13 +54,19 @@ public class Dealer implements Runnable {
     @Override
     public void run() {
         env.logger.info("thread " + Thread.currentThread().getName() + " starting.");
-        for (int i = 0; i < players.length; ++i){
-            playersThreads[i] = new Thread(players[i]);
-            playersThreads[i].start();
+        for (int i = 0; i < players.length; i++){
+            playersThreads[i] = new ThreadLogger(players[i],"i",env.logger);
+            playersThreads[i].startWithLog();
         }
+        
 
         while (!shouldFinish()) {
             placeCardsOnTable();
+            try {
+                // shutdown stuff
+            
+            playersThreads[0].joinWithLog();
+        } catch (InterruptedException ignored) {}
             timerLoop();
             updateTimerDisplay(false);
             removeAllCardsFromTable();
@@ -85,7 +92,7 @@ public class Dealer implements Runnable {
      * Called when the game should be terminated.
      */
     public void terminate() {
-        // TODO implement
+        terminate=false;
     }
 
     /**
@@ -108,11 +115,13 @@ public class Dealer implements Runnable {
      * Check if any cards can be removed from the deck and placed on the table.
      */
     private void placeCardsOnTable() {
-        Integer card = deck.remove(deck.size());
+       
         int minNumSlots = 0;
-        for (int slot = minNumSlots; slot < env.config.tableSize; ++slot)
-            if(table.slotToCard(slot) != null)
-                table.placeCard(card, slot); 
+        for (int slot = minNumSlots; slot < env.config.tableSize; ++slot){
+        Integer card = deck.get(slot);
+            if(table.slotToCard(slot) == null)
+                table.placeCard(card, slot);
+        } 
     }
 
     /**
