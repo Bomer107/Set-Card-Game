@@ -164,22 +164,24 @@ public class Player implements Runnable {
         while(!queue.isEmpty()){
             int []action=queue.poll();
             boolean isfind =false;
-            for(int i=0;i<2&!isfind;i++){
-                if(action[1]==tokens[i][1])
+            for(int i=0;i<tokenSize&!isfind;i++){
+                if(action[1]==tokens[i][1]){
                     isfind=true;
-                    removeToken(action[1],i);
+                    removeToken(action[0],i);
             }
-            if(!isfind&tokenSize<env.config.featureSize)
+        }
+            if(!isfind&tokenSize<env.config.featureSize){
                 addToken(action);
+            }
         }
     }
     public void removeToken(int slot,int rowToDelete){
         for (int i = rowToDelete; i < tokens.length - 1; i++) {
             tokens[i] = tokens[i + 1];
         }
-        tokens[tokens.length - 1] = new int[tokens[0].length];
+       
         tokenSize--;
-        boolean isremove= table.removeToken(slot,id);
+        boolean isremove= table.removeToken(id,slot);
     }   
 
     
