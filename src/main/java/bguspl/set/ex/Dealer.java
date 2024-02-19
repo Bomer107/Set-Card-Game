@@ -1,10 +1,12 @@
 package bguspl.set.ex;
 
 import bguspl.set.Env;
+import bguspl.set.ThreadLogger;
 
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.Collections;
 
 /**
  * This class manages the dealer's threads and data
@@ -21,7 +23,7 @@ public class Dealer implements Runnable {
      */
     private final Table table;
     private final Player[] players;
-    private final Thread[] playersThreads;
+    private final ThreadLogger[] playersThreads;
 
     /**
      * The list of card ids that are left in the dealer's deck.
@@ -42,7 +44,8 @@ public class Dealer implements Runnable {
         this.env = env;
         this.table = table;
         this.players = players;
-        playersThreads = new Thread[players.length];
+        this.terminate = false;
+        playersThreads = new ThreadLogger[players.length];
         deck = IntStream.range(0, env.config.deckSize).boxed().collect(Collectors.toList());
     }
 
@@ -51,13 +54,18 @@ public class Dealer implements Runnable {
      */
     @Override
     public void run() {
-        env.logger.info("thread " + Thread.currentThread().getName() + " starting.");
+        env.logger.info("thread " + Thread.currentThread().getName() + " starting run().");
+        
+        // creating the players Threads
         for (int i = 0; i < players.length; ++i){
-            playersThreads[i] = new Thread(players[i]);
-            playersThreads[i].start();
+            playersThreads[i] = new ThreadLogger(players[i], "player " + i, env.logger);
+            playersThreads[i].startWithLog();
         }
 
-        while (!shouldFinish()) {
+        reShuffleDeck();
+
+        //strating the game
+        while (!shouldFinish()) {     
             placeCardsOnTable();
             timerLoop();
             updateTimerDisplay(false);
@@ -106,11 +114,12 @@ public class Dealer implements Runnable {
      * Check if any cards can be removed from the deck and placed on the table.
      */
     private void placeCardsOnTable() {
-        Integer card = deck.remove(deck.size());
-        int minNumSlots = 0;
-        for (int slot = minNumSlots; slot < env.config.tableSize; ++slot)
-            if(table.slotToCard(slot) != null)
-                table.placeCard(card, slot); 
+        int firstSlot = 0;
+        for (int slot = firstSlot; slot < env.config.tableSize; ++slot)
+            if(table.slotToCard(slot) == null){
+                Integer card = deck.remove(deck.size() - 1);
+                table.placeCard(card, slot);
+            }
     }
 
     /**
@@ -118,7 +127,9 @@ public class Dealer implements Runnable {
      */
     private void sleepUntilWokenOrTimeout() {
         try {
-            this.wait(env.config.turnTimeoutMillis);
+            synchronized(this){
+                this.wait(env.config.turnTimeoutMillis);
+            }
         } catch (InterruptedException e) {}
     }
     
@@ -128,8 +139,12 @@ public class Dealer implements Runnable {
     private void updateTimerDisplay(boolean reset) {
         if(reset)
             env.ui.setCountdown(env.config.turnTimeoutMillis, false);
-        else()
-
+        else{
+            boolean warn = false;
+            if(true)
+                warn = true;
+            env.ui.setCountdown(env.config.turnTimeoutMillis - System.currentTimeMillis(), warn);
+        }
     }
 
     /**
@@ -144,5 +159,9 @@ public class Dealer implements Runnable {
      */
     private void announceWinners() {
         // TODO implement
+    }
+
+    private void reShuffleDeck(){
+        Collections.shuffle(deck);
     }
 }
