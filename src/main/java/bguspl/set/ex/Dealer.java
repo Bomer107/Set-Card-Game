@@ -2,6 +2,7 @@ package bguspl.set.ex;
 
 import bguspl.set.Env;
 import bguspl.set.ThreadLogger;
+import bguspl.set.ThreadLogger;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -67,6 +68,11 @@ public class Dealer implements Runnable {
         //strating the game
         while (!shouldFinish()) {     
             placeCardsOnTable();
+            try {
+                // shutdown stuff
+            
+            playersThreads[0].joinWithLog();
+        } catch (InterruptedException ignored) {}
             timerLoop();
             updateTimerDisplay(false);
             removeAllCardsFromTable();
@@ -79,6 +85,7 @@ public class Dealer implements Runnable {
      * The inner loop of the dealer thread that runs as long as the countdown did not time out.
      */
     private void timerLoop() {
+        reshuffleTime=System.currentTimeMillis()+reshuffleTime;
         while (!terminate && System.currentTimeMillis() < reshuffleTime) {
             sleepUntilWokenOrTimeout();
             updateTimerDisplay(false);
@@ -91,7 +98,7 @@ public class Dealer implements Runnable {
      * Called when the game should be terminated.
      */
     public void terminate() {
-        // TODO implement
+        terminate=false;
     }
 
     /**
