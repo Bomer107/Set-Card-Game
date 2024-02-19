@@ -1,0 +1,28 @@
+[08:11:33.184] [INFO   ] thread main starting.
+[08:11:33.209] [SEVERE ] cannot read configuration file config.properties trying from resources.
+[08:11:33.220] [SEVERE ] configuration file was loaded from resources directory.
+[08:11:34.809] [INFO   ] thread dealer starting.
+[08:11:34.810] [INFO   ] thread dealer starting.
+[08:11:34.810] [INFO   ] thread i starting.
+[08:11:34.811] [INFO   ] thread i starting.
+[08:11:34.811] [INFO   ] thread i starting.
+[08:11:34.812] [INFO   ] thread i starting.
+[08:11:34.917] [SEVERE ] placing card 0 in slot 0
+[08:11:35.018] [SEVERE ] placing card 1 in slot 1
+[08:11:35.118] [SEVERE ] placing card 2 in slot 2
+[08:11:35.219] [SEVERE ] placing card 3 in slot 3
+[08:11:35.320] [SEVERE ] placing card 4 in slot 4
+[08:11:35.421] [SEVERE ] placing card 5 in slot 5
+[08:11:35.521] [SEVERE ] placing card 6 in slot 6
+[08:11:35.622] [SEVERE ] placing card 7 in slot 7
+[08:11:35.723] [SEVERE ] placing card 8 in slot 8
+[08:11:35.824] [SEVERE ] placing card 9 in slot 9
+[08:11:35.924] [SEVERE ] placing card 10 in slot 10
+[08:11:36.025] [SEVERE ] placing card 11 in slot 11
+[08:11:48.622] [SEVERE ] key 44 was pressed by player 2
+[08:11:48.622] [SEVERE ] removing player 10 token from slot 1
+[08:12:12.195] [SEVERE ] key 44 was pressed by player 2
+[08:12:12.519] [SEVERE ] key 44 was pressed by player 2
+[08:12:12.836] [SEVERE ] key 46 was pressed by player 2
+[08:12:13.148] [SEVERE ] key 46 was pressed by player 2
+[08:12:14.385] [SEVERE ] exit button pressed
