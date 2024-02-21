@@ -3,10 +3,11 @@ package bguspl.set.ex;
 import bguspl.set.Env;
 
 import java.util.Arrays;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
+import java.util.Iterator;
 
 /**
  * This class contains the data that is visible to the player.
@@ -29,9 +30,14 @@ public class Table {
      * Mapping between a card and the slot it is in (null if none).
      */
     protected final Integer[] cardToSlot; // slot per card (if any)
-    public Semaphore sem;
-    private int[][] cardToCheck=new int[3][2];
-    private int player;
+
+    public final LinkedList<Player> queueOfPlayers;
+
+    private volatile boolean dealerChanges;
+    private volatile boolean playerChanges;
+
+
+
     /**
      * Constructor for testing.
      *
@@ -44,7 +50,7 @@ public class Table {
         this.env = env;
         this.slotToCard = slotToCard;
         this.cardToSlot = cardToSlot;
-        this.sem=new Semaphore(1);
+        this.queueOfPlayers = new LinkedList<Player>();
     }
 
     /**
@@ -101,22 +107,60 @@ public class Table {
         env.ui.placeCard(card, slot);
     }
 
+    public synchronized void placeCards(List<Integer> deck){
+        for (int slot = 0; slot < env.config.tableSize && !deck.isEmpty(); ++slot)
+            if (slotToCard(slot) == null){
+                Integer card = deck.remove(0);
+                placeCard(card, slot);
+            }
+            
+    }
+
     /**
      * Removes a card from a grid slot on the table.
      * @param slot - the slot from which to remove the card.
      */
     public void removeCard(int slot) {
-        Integer card = slotToCard[slot];
-        slotToCard[slot] = null;
-        cardToSlot[card] = null;
-
         try {
             Thread.sleep(env.config.tableDelayMillis);
         } catch (InterruptedException ignored) {}
 
+        Integer card = slotToCard[slot];
+        slotToCard[slot] = null;
+        cardToSlot[card] = null;
         env.ui.removeCard(slot);
-        
     }
+
+    public synchronized void removeCards(int[] playerTokens) {
+        for(int token : playerTokens){
+            removeCard(token);
+            env.ui.removeTokens(token);
+            Iterator<Player> iter = queueOfPlayers.iterator();
+            while(iter.hasNext()){
+                Player player = iter.next();
+                int[] thisPlayerTokens = player.getTokens();
+                for(int i = 0; i < thisPlayerTokens.length; i++){
+                    if(thisPlayerTokens[i] == token){
+                        player.tokenRemoved(token);
+                        iter.remove(); //removing from the queue
+                    }
+                }
+
+            }
+        }
+    }
+
+    public synchronized void removeAllCardsFromTable(List<Integer> deck){
+        env.logger.info("Deleting all cards from the table");
+        env.ui.removeTokens();
+        queueOfPlayers.clear();
+        for(int slot = 0; slot < env.config.tableSize; ++slot){
+            if(slotToCard(slot) != null){
+                deck.add(slotToCard(slot));
+                removeCard(slot);
+            }
+        }
+    }   
 
     /**
      * Places a player token on a grid slot.
@@ -124,11 +168,27 @@ public class Table {
      * @param slot   - the slot on which to place the token.
      */
     public void placeToken(int player, int slot) {
-        try{
-            sem.acquire();
-        } catch(InterruptedException e){}
-        if(slotToCard[slot] != null)
-            env.ui.placeToken(player, slot);
+        env.ui.placeToken(player, slot);
+    }
+
+    public void placeToken(Player player, int slot)
+    {
+        if(slotToCard(slot) == null){
+            return;
+        }
+        placeToken(player.id, slot);
+        player.placeToken(slot);
+        if(player.getNumTokens() == env.config.featureSize){
+            synchronized(this){
+                player.setDontGetInput(true);
+                env.logger.info("player " + player.id + " added to the queue");
+                queueOfPlayers.add(player);
+                synchronized(player.dealer){
+                    (player.dealer).notify();
+                }  
+            }
+        }
+       
     }
 
     /**
@@ -137,18 +197,12 @@ public class Table {
      * @param slot   - the slot from which to remove the token.
      * @return       - true iff a token was successfully removed.
      */
-    public boolean removeToken(int player, int slot) {
-        try{
-            sem.acquire();
-        } catch(InterruptedException e){}
+    public synchronized boolean removeToken(int player, int slot) {
         if(slotToCard[slot] != null){
             env.ui.removeToken(player, slot);
-            sem.release();
             return true;
         }
-        sem.release();
         return false;
-        
     }
 
     public Integer cardToSlot(Integer card){
@@ -158,12 +212,5 @@ public class Table {
     public Integer slotToCard(Integer slot){
         return slotToCard[slot];
     }
-    public void setCardToCheack(int[][] cardToCheack,int id){
-        
-        sem.release();
-        this.cardToCheck=cardToCheack;
-        player=id;
-        
-        
-    }
+
 }

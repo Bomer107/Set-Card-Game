@@ -1,8 +1,11 @@
 package bguspl.set.ex;
 
-import bguspl.set.Env;
+import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.Queue;
+import java.util.Random;
+
+import bguspl.set.Env;
+import bguspl.set.ThreadLogger;
 /**
  * This class manages the players' threads and data
  *
@@ -51,11 +54,15 @@ public class Player implements Runnable {
      */
     private int score;
 
-    private int[][] tokens = new int[3][2];
-    private int tokenSize = 0;
-    private  Queue<int[]> queue = new LinkedList<int[]>();
-    private boolean finish;
-    private long timeToSleep;
+    private LinkedList<Integer> tokens;
+
+    private LinkedList<Integer> keyInputQueue;
+
+    public long freeze;
+    private final long SECOND = 1000L;
+    private volatile boolean dontGetInput;
+    private volatile boolean waiting;
+
     /**
      * The dealer of the game.
      */
@@ -76,6 +83,16 @@ public class Player implements Runnable {
         this.table = table;
         this.id = id;
         this.human = human;
+        this.tokens = new LinkedList<Integer>();
+        this.keyInputQueue = new LinkedList<Integer>();
+        this.freeze = 0;    
+        playerThread = null;
+        dontGetInput = false;
+        waiting = false;
+    }
+
+    public void setPlayerThread(ThreadLogger playerThread){
+        this.playerThread = playerThread;
     }
 
     /**
@@ -84,18 +101,36 @@ public class Player implements Runnable {
     @Override
     public void run() {
         playerThread = Thread.currentThread();
-        env.logger.info("thread " + Thread.currentThread().getName() + " starting.");
+        env.logger.info("thread " + Thread.currentThread().getName() + " starting it's run() function.");
         if (!human) createArtificialIntelligence();
 
         while (!terminate) {
-            if(!queue.isEmpty())
-                checkToken();  
-            
+            try {
+                synchronized(this){
+                    waiting = true; 
+                    wait();}
+                } catch (Exception ignored) {}
+            waiting = false;
+
+            while(freeze > 0 && !terminate){
+                env.ui.setFreeze(id, freeze);
+                synchronized(this){
+
+                    try{env.logger.info("player got freezed");
+                        wait(SECOND);} catch(InterruptedException e){}
+
+                    freeze -= SECOND;
+                }
+                if(freeze == 0)
+                    env.ui.setFreeze(id, freeze);
             }
+            synchronized(table){
+                executeAction();
+            } 
+        }
             
-        
         if (!human) try { aiThread.join(); } catch (InterruptedException ignored) {}
-        env.logger.info("thread " + Thread.currentThread().getName() + " terminated.");
+        env.logger.info("thread " + Thread.currentThread().getName() + " ending it's run() function.");
     }
 
     /**
@@ -106,11 +141,9 @@ public class Player implements Runnable {
         // note: this is a very, very smart AI (!)
         aiThread = new Thread(() -> {
             env.logger.info("thread " + Thread.currentThread().getName() + " starting.");
+            Random rand = new Random();
             while (!terminate) {
-                // TODO implement player key press simulator
-                try {
-                    synchronized (this) { wait(); }
-                } catch (InterruptedException ignored) {}
+                keyPressed(rand.nextInt(11));
             }
             env.logger.info("thread " + Thread.currentThread().getName() + " terminated.");
         }, "computer-" + id);
@@ -121,7 +154,10 @@ public class Player implements Runnable {
      * Called when the game should be terminated.
      */
     public void terminate() {
-        // TODO implement
+        terminate = true;
+        try{
+            ((ThreadLogger)playerThread).joinWithLog();
+        } catch (InterruptedException e) {}
     }
 
     /**
@@ -130,11 +166,63 @@ public class Player implements Runnable {
      * @param slot - the slot corresponding to the key pressed.
      */
     public void keyPressed(int slot) {
-        Integer card=table.slotToCard(slot);
-        int []action={slot,card};
-        queue.add(action);
+            if(freeze > 0 || getDontGetInput())
+                return;
+            if(keyInputQueue.size() < 4){
+                if(keyInputQueue.size() == 3)
+                    keyInputQueue.poll();
+                keyInputQueue.add(slot);
+                synchronized(this){
+                    if(waiting)
+                        this.notify();
+                }
+            }
+        
+    }   
 
+    public void executeAction(){
+        if(keyInputQueue.isEmpty())
+            return;
+        int slot = keyInputQueue.poll();
+        Iterator<Integer> iter = tokens.iterator();
+        while(iter.hasNext()){
+            Integer token = iter.next();
+            if(token.equals(slot)){
+                table.removeToken(id, slot);
+                iter.remove();
+                return;
+            }
+        }
+        if(tokens.size() < env.config.featureSize){
+            table.placeToken(this, slot);
+        }
+    }
 
+    public void placeToken(int slot){
+        tokens.add(slot);
+    }
+
+    public int[] getCards()
+    {
+        int [] getCards = new int[env.config.featureSize];
+        Iterator<Integer> iter = tokens.iterator();
+        int tokenNum = 0;
+        while (iter.hasNext())
+            getCards[tokenNum++] = table.slotToCard(iter.next());
+        return getCards;
+    }
+
+    public int[] getTokens(){
+        int [] getTokens = new int[env.config.featureSize];
+        Iterator<Integer> iter = tokens.iterator();
+        int tokenNum = 0;
+        while (iter.hasNext())
+            getTokens[tokenNum++] = (iter.next()).intValue();
+        return getTokens;
+    }
+
+    public int getNumTokens(){
+        return tokens.size();
     }
 
     /**
@@ -144,10 +232,10 @@ public class Player implements Runnable {
      * @post - the player's score is updated in the ui.
      */
     public void point() {
-        
-        // TODO implement
-
         int ignored = table.countCards(); // this part is just for demonstration in the unit tests
+        freeze = env.config.pointFreezeMillis;
+        tokens.clear();
+        keyInputQueue.clear();
         env.ui.setScore(id, ++score);
     }
 
@@ -155,51 +243,36 @@ public class Player implements Runnable {
      * Penalize a player and perform other related actions.
      */
     public void penalty() {
-        // TODO implement
+        freeze = env.config.penaltyFreezeMillis;
     }
 
     public int score() {
         return score;
     }
-    private void checkToken(){
-        while(!queue.isEmpty()){
-            int []action=queue.poll();
-            boolean isfind =false;
-            for(int i=0;i<tokenSize&!isfind;i++){
-                if(action[1]==tokens[i][1]){
-                    isfind=true;
-                    removeToken(action[0],i);
-            }
-        }
-            if(!isfind&tokenSize<env.config.featureSize){
-                addToken(action);
-            }
+
+    public void tokenRemoved(int tokenToRemove){
+        Iterator<Integer> iter = tokens.iterator();
+        while(iter.hasNext()){
+            Integer token = iter.next();
+            if(token.equals(tokenToRemove))
+                iter.remove();
         }
     }
-    public void removeToken(int slot,int rowToDelete){
-        for (int i = rowToDelete; i < tokens.length - 1; i++) {
-            tokens[i] = tokens[i + 1];
-        }
-       
-        tokenSize--;
-        boolean isremove = table.removeToken(id,slot);
-    }   
 
-    
-    public void addToken(int[]token){
-        tokens[tokenSize]=token;
-        tokenSize++;
-        table.placeToken(id,token[0]);
-        if(tokenSize==3){
-            table.setCardToCheack(tokens, id);
-            dealer.notify();
-            synchronized(this){
-                try{
-                     wait();
-                 }catch(InterruptedException e){}
-            }
-            
-        }
-        table.sem.release();
+    public void newBoard(){
+        tokens.clear();
+        keyInputQueue.clear();
+    }
+
+    public synchronized void setDontGetInput(boolean dontGetInput){
+        this.dontGetInput = dontGetInput;
+    }
+
+    public synchronized boolean getDontGetInput(){
+        return dontGetInput;
+    }
+
+    public synchronized boolean getWaiting(){
+        return waiting;
     }
 }
