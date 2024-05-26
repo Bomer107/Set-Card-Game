@@ -2,7 +2,9 @@ package bguspl.set.ex;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -24,9 +26,11 @@ public class Dealer implements Runnable {
      */
     private final Table table;
     private final Player[] players;
-    private static final long TIME_TO_UPDATE_CLOCK = 10;
     private int[] playerCardsToRemove;
-    public boolean isWaiting;
+    private boolean elapsed = false;
+    public boolean timer = false;
+    private boolean hints;
+    
 
 
     /**
@@ -39,10 +43,15 @@ public class Dealer implements Runnable {
      */
     private volatile boolean terminate;
 
+    private Thread dThread = null;
+
     /**
      * The time when the dealer needs to reshuffle the deck due to turn timeout.
      */
     private long reshuffleTime = Long.MAX_VALUE;
+    private long startTime = 0;
+    private final long SECOND = 1000;
+    private final long TEN_MILLIE = 10;
 
     public Dealer(Env env, Table table, Player[] players) {
         this.env = env;
@@ -51,7 +60,12 @@ public class Dealer implements Runnable {
         this.terminate = false;
         deck = IntStream.range(0, env.config.deckSize).boxed().collect(Collectors.toList());
         playerCardsToRemove = null;
-        isWaiting = false;
+
+        if(env.config.turnTimeoutMillis == 0)
+            elapsed = true;
+        if(env.config.turnTimeoutMillis > 0)
+            timer = true;
+        hints = env.config.hints;
     }
 
     /**
@@ -59,9 +73,10 @@ public class Dealer implements Runnable {
      */
     @Override
     public void run() {
+        dThread = Thread.currentThread();
         env.logger.info("thread " + (Thread.currentThread()).getName() + " starting run().");
 
-        acquireTableSemaphore();
+        lockEntireTable();
 
         // creating the players Threads
         for (int i = 0; i < players.length; ++i){
@@ -70,44 +85,83 @@ public class Dealer implements Runnable {
             playerThread.startWithLog();
         }
 
+        startTime = System.currentTimeMillis();
+
         //strating the game
         while (!shouldFinish()) {
             reShuffleDeck();
             placeCardsOnTable();
+
+            releaseEntireTable();
+
+            if(elapsed){
+                startTime = System.currentTimeMillis();
+            }
             
             timerLoop();
 
-            //updateTimerDisplay(false);
-            removeAllCardsFromTable();
+            if(!terminate){
+                lockEntireTable();
+                while(!table.queueOfPlayers.isEmpty()){
+                    checkSet(table.queueOfPlayers.poll());
+                    if(playerCardsToRemove != null){
+                        removeCardsFromTable();
+                        placeCardsOnTable();
+                    }
+                }
+                removeAllCardsFromTable();
+            }
         }
-        releaseTableSemaphore();
-        announceWinners();
-        if(!terminate)
+        if(!terminate){
+            announceWinners();
             terminate();
+        }
     }
 
     /**
      * The inner loop of the dealer thread that runs as long as the countdown did not time out.
      */
     private void timerLoop() {
-        reshuffleTime = System.currentTimeMillis() + env.config.turnTimeoutMillis - 1;
         updateTimerDisplay(true);
         boolean printedHints = false;
         while (!terminate && System.currentTimeMillis() < reshuffleTime) {
-            releaseTableSemaphore();
-            if(env.config.hints && !printedHints){
+            
+            if(hints && !printedHints){
                 table.hints();
                 printedHints = true;
+            }
+            updateTimerDisplay(false);
+
+            if(!timer && table.setsAvailable().isEmpty()){
+                return;
             }
     
             sleepUntilWokenOrTimeout(); // wake up and check if there is a set
 
             if(playerCardsToRemove != null){
                 printedHints = false;
+                changeBoard();
             }
-
-            changeBoard();
+                
+            else
+                updateTimerDisplay(false);
+            
+            
         }
+    }
+
+    private void changeBoard(){
+        acquireLocks(playerCardsToRemove);
+        updateTimerDisplay(true);
+        removeCardsFromTable();
+        placeCardsOnTable();
+
+        if(elapsed)
+            startTime = System.currentTimeMillis();
+        
+        releaseLocks(playerCardsToRemove);
+        playerCardsToRemove = null;
+    
     }
 
     /**
@@ -120,6 +174,7 @@ public class Dealer implements Runnable {
             player.terminate();
         }
         terminate = true;
+        dThread.interrupt();
     }
 
     /**
@@ -137,14 +192,11 @@ public class Dealer implements Runnable {
     private void removeCardsFromTable() {
         for(int i = 0; i < playerCardsToRemove.length; ++i){
             for(Player player : players){
-                synchronized (player) {
-                    player.tokenRemove(playerCardsToRemove[i]);
-                }
+                player.tokenRemove(playerCardsToRemove[i]);
             }
         }
-        table.removeCards(playerCardsToRemove);
-        playerCardsToRemove = null;
         
+        table.removeCards(playerCardsToRemove);
         env.logger.info("sizeOfDeck " + deck.size());
     }
 
@@ -152,7 +204,6 @@ public class Dealer implements Runnable {
      * Check if any cards can be removed from the deck and placed on the table.
      */
     private void placeCardsOnTable() {
-
         env.logger.info("placing cards on the table");
         table.placeCards(deck);
     }
@@ -161,37 +212,87 @@ public class Dealer implements Runnable {
      * Sleep for a fixed amount of time or until the thread is awakened for some purpose.
      */
     private void sleepUntilWokenOrTimeout() {
-        try{
-            synchronized(this){
-                //System.out.println("dealer goes to sleep");
-                wait(TIME_TO_UPDATE_CLOCK);
-            }
-        }catch(InterruptedException wakeUp){}
-        //System.out.println("dealer wakes up from sleep");
+        Player player = null;
+        if(timer){
+            try{
+                player = table.queueOfPlayers.poll(calculateSleep(), TimeUnit.MILLISECONDS);
+            }catch(InterruptedException wakeUp){dThread.interrupt(); return;}
+        }
+        else if (elapsed){
+            try {
+                player = table.queueOfPlayers.poll(calculateSleepElapsed(), TimeUnit.MILLISECONDS);
+            }catch(InterruptedException wakeUp){dThread.interrupt(); return;}
+        }  
+
+        else{
+            try {
+                player = table.queueOfPlayers.take();
+            }catch(InterruptedException wakeUp){dThread.interrupt(); return;}
+        }
+        
+        checkSet(player);
+    }
+
+    private long calculateSleep(){
+        long nextWakeUp;
+        if(reshuffleTime - System.currentTimeMillis() <= env.config.turnTimeoutWarningMillis)
+            nextWakeUp = TEN_MILLIE;
+        else
+            nextWakeUp = SECOND;
+
+        long elapsedTime = System.currentTimeMillis() - startTime;
+        long sleep = nextWakeUp - (elapsedTime % nextWakeUp);
+        return sleep;
+    }
+
+    private long calculateSleepElapsed(){
+        long elapsedTime = System.currentTimeMillis() - startTime;
+        long sleep = SECOND - (elapsedTime % SECOND);
+        return sleep;
     }
     
     /**
      * Reset and/or update the countdown and the countdown display.
      */
     private void updateTimerDisplay(boolean reset) {
-        boolean warn = false;
-        if(reset){
-            
-            if(env.config.turnTimeoutMillis < env.config.turnTimeoutWarningMillis)
-                warn = true;
+        if(timer){
+            boolean warn = false;
+            if(!reset){
+                long timeLeft = reshuffleTime - System.currentTimeMillis();
+                long roundedTimeLeft = timeLeft - (TEN_MILLIE / 2);
+                
+                if(roundedTimeLeft < 0){
+                    env.ui.setCountdown(0, true);
+                    return;
+                }
 
-            env.ui.setCountdown(env.config.turnTimeoutMillis, warn);
-            reshuffleTime = System.currentTimeMillis() + env.config.turnTimeoutMillis;
-        }
-        else{
-            long time = reshuffleTime - System.currentTimeMillis();
-            if(time < 0){
-                env.ui.setCountdown(0, true);
-                return;
+                if(timeLeft < env.config.turnTimeoutWarningMillis){
+                    env.ui.setCountdown(roundedTimeLeft, true); //we know that the time will be almost accureate. so we round it
+                    return;
+                }
+
+                roundedTimeLeft = timeLeft - (SECOND / 2);
+                    
+                if(roundedTimeLeft < 0){
+                    env.ui.setCountdown(0, true);
+                    return;
+                }
+                
+                else
+                    env.ui.setCountdown(roundedTimeLeft, false); //we know that the time will be almost accureate. so we round it
             }
-            if(time < env.config.turnTimeoutWarningMillis)
-                warn = true;
-            env.ui.setCountdown(time, warn);
+            else{
+                startTime = System.currentTimeMillis();
+                reshuffleTime = startTime + env.config.turnTimeoutMillis - 1;
+                if(env.config.turnTimeoutMillis < env.config.turnTimeoutWarningMillis)
+                    warn = true;
+                env.ui.setCountdown(env.config.turnTimeoutMillis - 1, warn);
+            }
+        }
+        else if(elapsed){
+            long time = System.currentTimeMillis() - startTime;
+            env.ui.setElapsed(time + (SECOND / 2)); //we know that the time will be almost accureate. so we round it
+            return;
         }
     }
 
@@ -200,9 +301,7 @@ public class Dealer implements Runnable {
      */
     private void removeAllCardsFromTable() {
         for(Player player: players){
-            synchronized (player) {
-                player.newBoard();
-            }
+            player.newBoard();
         }
         table.removeAllCardsFromTable(deck);
     }
@@ -239,52 +338,61 @@ public class Dealer implements Runnable {
         Collections.shuffle(deck);
     }
 
-    private void checkSet(Queue<Player> queueOfPlayers){
-        if(!(table.queueOfPlayers.isEmpty())){
-            Player player = queueOfPlayers.poll();
-            System.out.println("dealer pulled player " + player.id + " from the queue");
-            System.out.println("--------------------------------------------------------------------");
-            if(env.util.testSet(player.getCards())){
-                playerCardsToRemove = player.getTokens();
-                player.point();
-            }
-            else{
-                player.penalty();
-            }
+    private void checkSet(Player player){
+        if(player == null)
+            return;
+        BlockingQueue<Integer> waitingOfPlayer = player.getWaitingZone();
+        if(env.util.testSet(player.getCards())){
+            playerCardsToRemove = player.getTokens();
+            player.point();
+        }
+        else{
+            player.penalty();
+        }
+        waitingOfPlayer.offer(0);
+    }
 
-            synchronized(player){
-                System.out.println("dealer notifies player " + player.id);
-                player.notify();
-            }
+    private void acquireLocks(int[] slots){
+        for(int i = 0; i < slots.length; ++i){
+            Semaphore sem = table.locks[slots[i]];
+            try {
+                sem.acquire();
+            } catch (InterruptedException e) {dThread.interrupt(); return;}
+        }
+        
+    }
+
+    private void releaseLocks(int[] slots){
+        for(int i = 0; i < slots.length; ++i){
+            Semaphore sem = table.locks[slots[i]];
+            sem.release();
         }
     }
 
-    private void acquireTableSemaphore(){
-        try {
-            env.logger.info("dealer acquires semaphore");
-            //System.out.println("dealer acquires semaphore");
-            (table.queueOfChange).acquire();
-        } catch (InterruptedException ignore) {}
+    private void lockEntireTable(){
+        for(int i = 0; i < players.length; i++){
+            players[i].setStopInput(true);
+        }
+        Semaphore[] semaphores = table.locks;
+        for(int i = 0; i < semaphores.length; ++i){
+            Semaphore sem = semaphores[i];
+            try {
+                sem.acquire();
+            } catch (InterruptedException ignore) {dThread.interrupt(); return;}
+        }
     }
 
-    private void releaseTableSemaphore(){
-        env.logger.info("dealer releases semaphore");
-        //System.out.println("dealer releases semaphore");
-        (table.queueOfChange).release();
+    private void releaseEntireTable(){
+        for(int i = 0; i < players.length; i++){
+            players[i].setStopInput(false);
+        }
+        Semaphore[] semaphores = table.locks;
+        for(int i = 0; i < semaphores.length; ++i){
+            Semaphore sem = semaphores[i];
+            sem.release();
+        }
     }
 
-    public void changeBoard(){
-        acquireTableSemaphore(); 
-        do{
-            checkSet(table.queueOfPlayers);
-            if(playerCardsToRemove == null)
-                    updateTimerDisplay(false);
-            else{
-                updateTimerDisplay(true);
-                removeCardsFromTable();
-                placeCardsOnTable();
-            }
-        }while(!(table.queueOfPlayers.isEmpty()));
-    }
+
 
 }

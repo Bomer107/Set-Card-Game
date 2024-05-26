@@ -2,10 +2,11 @@ package bguspl.set.ex;
 
 import java.util.Arrays;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 import bguspl.set.Env;
@@ -32,11 +33,11 @@ public class Table {
      */
     protected final Integer[] cardToSlot; // slot per card (if any)
 
-    public final LinkedList<Player> queueOfPlayers;
-    public Semaphore queueOfChange;
-    private volatile boolean newBoard;
+    public final LinkedBlockingQueue<Player> queueOfPlayers;
+    public final Semaphore[] locks;
+    public final Semaphore queueSem;
 
-    private static int LEGAL_SET_SIZE = 3;
+    private int legalSetSize;
 
 
 
@@ -52,10 +53,15 @@ public class Table {
         this.env = env;
         this.slotToCard = slotToCard;
         this.cardToSlot = cardToSlot;
-        this.queueOfPlayers = new LinkedList<Player>();
-        this.queueOfChange = new Semaphore(1, true);
-        this.newBoard = false;
+        this.queueOfPlayers = new LinkedBlockingQueue<Player>();
+        this.locks = new Semaphore[env.config.tableSize];
 
+        for(int i = 0; i < locks.length; ++i){
+            locks[i] = new Semaphore(1, true);
+        }
+
+        this.queueSem = new Semaphore(1, true);
+        legalSetSize = env.config.featureSize;
     }
 
     /**
@@ -68,17 +74,29 @@ public class Table {
         this(env, new Integer[env.config.tableSize], new Integer[env.config.deckSize]);
     }
 
+
+    public List<int[]> setsAvailable(){
+        List<Integer> deck = Arrays.stream(slotToCard).filter(Objects::nonNull).collect(Collectors.toList());
+        List<int[]> sets = env.util.findSets(deck, Integer.MAX_VALUE);
+        return sets;
+    }
+
     /**
      * This method prints all possible legal sets of cards that are currently on the table.
      */
     public void hints() {
-        List<Integer> deck = Arrays.stream(slotToCard).filter(Objects::nonNull).collect(Collectors.toList());
-        env.util.findSets(deck, Integer.MAX_VALUE).forEach(set -> {
-            StringBuilder sb = new StringBuilder().append("Hint: Set found: ");
-            List<Integer> slots = Arrays.stream(set).mapToObj(card -> cardToSlot[card]).sorted().collect(Collectors.toList());
-            int[][] features = env.util.cardsToFeatures(set);
-            System.out.println(sb.append("slots: ").append(slots).append(" features: ").append(Arrays.deepToString(features)));
-        });
+       List<int[]> sets = setsAvailable();
+        if(!sets.isEmpty()){
+            sets.forEach(set -> {
+                StringBuilder sb = new StringBuilder().append("Hint: Set found: ");
+                List<Integer> slots = Arrays.stream(set).mapToObj(card -> cardToSlot[card]).sorted().collect(Collectors.toList());
+                int[][] features = env.util.cardsToFeatures(set);
+                System.out.println(sb.append("slots: ").append(slots).append(" features: ").append(Arrays.deepToString(features)));
+            });
+        }
+        else
+            System.out.println("There are no possible sets on this board");
+            
         System.out.println("------------------------------------------------------------------------------------------");
     }
 
@@ -105,7 +123,7 @@ public class Table {
     public void placeCard(int card, int slot) {
         try {
             Thread.sleep(env.config.tableDelayMillis);
-        } catch (InterruptedException ignored) {}
+        } catch (InterruptedException e) {Thread.currentThread().interrupt(); return;}
 
         cardToSlot[card] = slot;
         slotToCard[slot] = card;
@@ -128,7 +146,7 @@ public class Table {
     public void removeCard(int slot) {
         try {
             Thread.sleep(env.config.tableDelayMillis);
-        } catch (InterruptedException ignored) {}
+        } catch (InterruptedException ignored) {Thread.currentThread().interrupt(); return;}
 
         Integer card = slotToCard[slot];
         slotToCard[slot] = null;
@@ -141,19 +159,23 @@ public class Table {
         for(int token : playerTokens){
             removeCard(token);
         }
+
+        try {
+            queueSem.acquire();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        }
         Iterator<Player> iter = queueOfPlayers.iterator();
         while(iter.hasNext()){
             Player player = iter.next();
             if(player.getNumTokens() != 3){
                 iter.remove();
-                System.out.println("player " + player.id + " got removed from the queue");
-                synchronized(player){
-                    player.setFreeze(0);
-                    player.notify();
-                    System.out.println("dealer " + player.id + " notifies player");
-                }
+                player.getWaitingZone().offer(0);
             }
         }
+        queueSem.release();
+    
     }
 
     public void removeAllCardsFromTable(List<Integer> deck){
@@ -164,11 +186,7 @@ public class Table {
                 deck.add(slotToCard(slot));
                 removeCard(slot);
             }
-        }
-
-        //setNewBoard(true);
-        //while()
-        
+        }       
     }   
 
     /**
@@ -180,47 +198,42 @@ public class Table {
         env.ui.placeToken(player, slot);
     }
 
-    //sync with queueOfChange
+    //sync with sem
     public void placeToken(Player player, int slot){
+        Semaphore sem = locks[slot];
         try {
-            queueOfChange.acquire();
-            env.logger.info("player " + player.id + " acquires semaphore");
-            //System.out.println("player " + player.id + " acquires semaphore");
-        }catch(InterruptedException wakeUp){return;}
-
-        if(slotToCard(slot) == null /*|| IsNewBoard()*/){
-            queueOfChange.release();
+            sem.acquire();
+        } catch (InterruptedException e) {
             return;
         }
-        
+
+        if(slotToCard(slot) == null){
+            sem.release();
+            return;
+        }
+
         placeToken(player.id, slot);
         player.placeToken(slot);
 
-        if(player.getNumTokens() == LEGAL_SET_SIZE){
-            //env.logger.info("player " + player.id + " added to queue");
-            env.logger.info("player " + player.id + " releases semaphore");
-            //System.out.println("player " + player.id + " releases semaphore");
-            player.setFreeze(1000);
-            synchronized(player){
+        if(player.getNumTokens() == legalSetSize){
+            player.setStopInput(true);
+            try {
+                queueSem.acquire();
+            } catch (InterruptedException e) {
+                sem.release();
+                return;
+            }
+            sem.release();
+            
+            if(player.getNumTokens() == legalSetSize)
                 queueOfPlayers.offer(player);
-                queueOfChange.release();
-                System.out.println("player " + player.id + " added to queue");
-                synchronized(player.dealer){
-                    (player.dealer).notify();
-                }
-                try {
-                    System.out.println(player.id + " going to sleep");
-                    player.wait();
-                } catch (InterruptedException wakeUp) {}
-                System.out.println(player.id + " wakes up");
-            } 
+
+            queueSem.release();
+            player.enterWaitingZone();
         }
-        else{
-            env.logger.info("player " + player.id + " releases semaphore");
-            queueOfChange.release();
-            //System.out.println("player " + player.id + " releases semaphore"); 
-        }
-        
+        else
+            sem.release();
+
     }
 
     /**
@@ -228,7 +241,7 @@ public class Table {
      * @param player - the player the token belongs to.
      * @param slot   - the slot from which to remove the token.
      * @return       - true iff a token was successfully removed.
-     *///sync with queueOfChange
+     *///sync with sem
     public boolean removeToken(int player, int slot) {
         boolean tokenRemoved = false;
         if(slotToCard[slot] != null){
@@ -239,8 +252,9 @@ public class Table {
     }
 
     public boolean removeToken(Player player, int slot){
+        Semaphore sem = locks[slot];
         try {
-            queueOfChange.acquire();
+            sem.acquire();
         } catch (InterruptedException interrupted) {return false;}
 
         boolean tokenRemoved = removeToken(player.id, slot);
@@ -248,7 +262,7 @@ public class Table {
             player.tokenRemove(slot);
         }
     
-        queueOfChange.release();
+        sem.release();
         return tokenRemoved;
     }
 
@@ -260,18 +274,7 @@ public class Table {
         return slotToCard[slot];
     }
 
-    public boolean IsNewBoard(){
-        return newBoard;
-    }
-
-    public void setNewBoard(boolean dealerCreatingNewBoard){
-        newBoard = dealerCreatingNewBoard;
-    }
-
-    public LinkedList<Player> getQueueOfPlayers(){
-        return queueOfPlayers;
-    }
-
+    // for debugging
     public void printQueueOfPlayers(){
         Iterator<Player> iter = queueOfPlayers.iterator();
         while(iter.hasNext()){

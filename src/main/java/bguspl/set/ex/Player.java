@@ -1,10 +1,11 @@
 package bguspl.set.ex;
 
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.Random;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
 import bguspl.set.Env;
 import bguspl.set.ThreadLogger;
 /**
@@ -55,13 +56,16 @@ public class Player implements Runnable {
      */
     private int score;
 
-    private final LinkedList<Integer> tokens;
+    private final ConcurrentLinkedQueue<Integer> tokens;
 
     private final BlockingQueue<Integer> keyInputQueue;
+    private final BlockingQueue<Integer> waitingOfPlayer;
 
     private volatile long freeze;
     private final static long SECOND = 1000L;
-    private final static int LEGAL_SET_SIZE = 3;
+    private int legalSetSize;
+
+    private volatile boolean stopInput = false;
 
     /**
      * The dealer of the game.
@@ -83,10 +87,14 @@ public class Player implements Runnable {
         this.table = table;
         this.id = id;
         this.human = human;
-        this.tokens = new LinkedList<Integer>();
-        this.keyInputQueue = new ArrayBlockingQueue<>(LEGAL_SET_SIZE);
+        legalSetSize = env.config.featureSize;
+
+        this.tokens = new ConcurrentLinkedQueue<Integer>();
+        this.keyInputQueue = new ArrayBlockingQueue<>(legalSetSize);
+        this.waitingOfPlayer = new ArrayBlockingQueue<Integer>(1);
         this.freeze = 0;    
         playerThread = null;
+        
     }
 
     public void setPlayerThread(ThreadLogger playerThread){
@@ -102,23 +110,26 @@ public class Player implements Runnable {
         env.logger.info("thread " + Thread.currentThread().getName() + " starting it's run() function.");
         if (!human) {
         createArtificialIntelligence();
-        
         }
+
         while (!terminate) {
             
             executeAction();
             
-            while(getFreeze() > 0){
+            while(freeze > 0 && !terminate){
                 env.ui.setFreeze(id, freeze);
-                synchronized(this){
-                    try{env.logger.info("player got freezed");
-                        wait(SECOND);} catch(InterruptedException e){}
-                    freeze -= SECOND;
                 
-                if(freeze == 0)
-                    env.ui.setFreeze(id, freeze);
+                long timeToSleep = freeze < SECOND ? freeze : SECOND;
+                try{Thread.sleep(timeToSleep);} catch(InterruptedException e){}
+                
+                freeze -= SECOND;
+                
+                if(freeze <= 0){  
+                    env.ui.setFreeze(id, 0);
                 }
             }
+            
+            stopInput = false;
             
         }
             
@@ -136,7 +147,7 @@ public class Player implements Runnable {
             env.logger.info("thread " + Thread.currentThread().getName() + " starting.");
             Random rand = new Random();
             while (!terminate) {
-                keyPressed(rand.nextInt(12));
+                keyPressed(rand.nextInt(env.config.tableSize));
             }
             env.logger.info("thread " + Thread.currentThread().getName() + " terminated.");
         }, "computer-" + id, env.logger);
@@ -160,14 +171,8 @@ public class Player implements Runnable {
      * @param slot - the slot corresponding to the key pressed.
      */
     public void keyPressed(int slot) {
-        //System.out.println("key pressed: " + slot);
-        //env.logger.info("player " + id + " got key Pressed " + slot);
-        if(getFreeze() > 0){
-            //env.logger.info("player " + id + " didn't add the key press " + slot);
-            return;
-        }
-        keyInputQueue.offer(slot);
-        //env.logger.info("player " + id + " added the key press " + slot);
+        if(!stopInput)
+            keyInputQueue.offer(slot);
     }   
        
 
@@ -177,30 +182,25 @@ public class Player implements Runnable {
             slot = keyInputQueue.take();
         } catch (InterruptedException Interrupted) {return;}
 
-        for (Integer token : tokens) {
-            if(token.equals(slot)){
-                table.removeToken(this, slot);
-                return;
-            }
+        if(tokens.contains(slot) && !terminate){
+            table.removeToken(this, slot);
+            return;
         }
         
-        if(tokens.size() < LEGAL_SET_SIZE){
+        if(tokens.size() < legalSetSize && !terminate){
             table.placeToken(this, slot);     
-            //printTokens();
         }
         
     }
 
     public void placeToken(int slot){
-        //synchronized(tokens) {
-            tokens.add(slot);
-        //}
+        tokens.add(slot);
     }
 
     public int[] getCards()
     {
-        if(tokens.size() == LEGAL_SET_SIZE){
-            int [] getCards = new int[LEGAL_SET_SIZE];
+        if(tokens.size() == legalSetSize){
+            int [] getCards = new int[legalSetSize];
             Iterator<Integer> iter = tokens.iterator();
             int tokenNum = 0;
             while (iter.hasNext())
@@ -232,6 +232,7 @@ public class Player implements Runnable {
      * @post - the player's score is updated in the ui.
      */
     public void point() {
+        @SuppressWarnings("unused")
         int ignored = table.countCards(); // this part is just for demonstration in the unit tests
         env.logger.info("player got point");
         setFreeze(env.config.pointFreezeMillis);
@@ -251,13 +252,8 @@ public class Player implements Runnable {
         return score;
     }
 
-    public void tokenRemove(int tokenToRemove){
-        Iterator<Integer> iter = tokens.iterator();
-        while(iter.hasNext()){
-            Integer token = iter.next();
-            if(token.equals(tokenToRemove))
-                iter.remove();
-        }
+    public boolean tokenRemove(int tokenToRemove){
+        return tokens.remove(tokenToRemove);
     }
 
     public void newBoard(){
@@ -281,6 +277,8 @@ public class Player implements Runnable {
         keyInputQueue.clear();
     }
 
+
+    //for debuging
     public void printTokens(){
         Iterator<Integer> iter = tokens.iterator();
         while(iter.hasNext()){
@@ -288,6 +286,20 @@ public class Player implements Runnable {
             System.out.print(" - ");
         }
         System.out.println();
+    }
+
+    public void enterWaitingZone(){
+        try {
+            waitingOfPlayer.take();
+        } catch (InterruptedException e) {}
+    }
+
+    public BlockingQueue<Integer> getWaitingZone(){
+        return waitingOfPlayer;
+    }
+
+    public void setStopInput(boolean censor){
+        stopInput = censor;
     }
 
 }
